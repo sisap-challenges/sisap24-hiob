@@ -1,0 +1,19 @@
+[package]
+name = "rust-search"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hiob = {version="0.1.0", path="../hiob"}
+num_cpus = "1.0"
+reqwest = {version="0.11.18", default-features=false, features=["blocking"]}
+# hdf5 = "0.8.1"
+ndarray = "0.15.6"
+clap = {version="4.3.10", features=["derive"]}
+itertools = "0.11.0"
+num-traits = "0.2.15"
+rayon = "1.7.0"
+pyo3 = {version="0.18.3", features=["auto-initialize"]}
+numpy = "0.18.0"
