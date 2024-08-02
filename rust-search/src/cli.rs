@@ -50,5 +50,8 @@ pub struct Cli {
 	/// Whether to use ITQ initialization, if false will use RANSAC
 	#[arg(long, default_value_t=false)]
 	pub itq: bool,
+	/// Whether to store the sketches computed by HIOB in the output file
+	#[arg(long, default_value_t=false)]
+	pub export_sketches: bool,
 }
 

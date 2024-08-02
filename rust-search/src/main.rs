@@ -26,11 +26,13 @@ mod fs_fun;
 mod h5py_fun;
 mod cli;
 
-use crate::fs_fun::{download_if_missing};
+use crate::fs_fun::download_if_missing;
 // use crate::hdf5_fun::store_results;
 use crate::h5py_fun::store_results;
+use crate::h5py_fun::store_results_no_sketches;
 use crate::h5py_fun::store_results_hamming;
-use crate::cli::{Cli};
+use crate::h5py_fun::store_results_hamming_no_sketches;
+use crate::cli::Cli;
 // use crate::h5py_fun::{get_h5py_shape, get_h5py_slice_f32};
 
 const PRODUCTION_MODE: bool = true;
@@ -172,6 +174,7 @@ fn run_experiment(
 	noise_std: f32,
 	nprobe_vals: &Vec<usize>,
 	init_itq: bool,
+	export_sketches: bool,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -282,16 +285,16 @@ fn run_experiment(
 		);
 		let out_file = result_path(out_base_path, kind, size, index_identifier.as_str(), param_string.as_str());
 		let storage_timer = Timer::new();
-		store_results(
+		(if export_sketches {store_results} else {store_results_no_sketches})(
 			out_file.as_str(),
 			kind,
 			size,
 			format!("{} + brute-force", index_identifier).as_str(),
 			param_string.as_str(),
-			neighbor_dists,
-			neighbor_ids,
-			data_bins.pop().unwrap(),
-			queries_bins.pop().unwrap(),
+			&neighbor_dists,
+			&neighbor_ids,
+			&data_bins[data_bins.len()-1],
+			&queries_bins[queries_bins.len()-1],
 			build_time,
 			query_time,
 		)?;
@@ -315,6 +318,7 @@ fn run_noram_experiment(
 	noise_std: f32,
 	nprobe_vals: &Vec<usize>,
 	init_itq: bool,
+	export_sketches: bool,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -389,16 +393,38 @@ fn run_noram_experiment(
 		println!("Queries binarized in {:}", queries_bin_timer.elapsed_str());
 		/* Perform query */
 		let query_call_timer = Timer::new();
-		let chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
-		let (mut neighbor_dists, mut neighbor_ids) = bin_eval.query_cascade_h5(
-			&data_path.as_str(),
-			key,
+		// let chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
+		// let (mut neighbor_dists, mut neighbor_ids) = bin_eval.query_cascade_h5(
+		// 	&data_path.as_str(),
+		// 	key,
+		// 	&data_bins,
+		// 	&queries,
+		// 	&queries_bins,
+		// 	k,
+		// 	nprobes,
+		// 	Some(chunk_size),
+		// );
+		/* First compute Hamming neighbors all at once efficiently */
+		let hamming_chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
+		let (_, hamming_ids) = bin_eval.cascading_k_smallest_hamming(
 			&data_bins,
-			&queries,
 			&queries_bins,
-			k,
 			nprobes,
-			Some(chunk_size),
+			Some(hamming_chunk_size),
+		);
+		/* Then refine with as few sequential (to avoid race conditions in h5py) IO operations as possible */
+		/* IO chunks are selected to load at most 300k vectors each IO operation */
+		let io_chunk_size = std::cmp::max(num_threads()*2, 300_000 / nprobes.iter().max().unwrap());
+		/* Chunks for refinement are chosen to get a good load balancing between threads */
+		let euc_chunk_size = (io_chunk_size+num_threads()*2-1)/(num_threads()*2);
+		let (mut neighbor_dists, mut neighbor_ids) = bin_eval.refine_h5(
+			&data_path,
+			key,
+			&queries,
+			&hamming_ids,
+			k,
+			Some(io_chunk_size),
+			Some(euc_chunk_size),
 		);
 		println!("Queries executed in {:}", query_call_timer.elapsed_str());
 		/* Modify dot products to euclidean distances and change to 1-based index */
@@ -418,16 +444,16 @@ fn run_noram_experiment(
 		);
 		let out_file = result_path(out_base_path, kind, size, index_identifier.as_str(), param_string.as_str());
 		let storage_timer = Timer::new();
-		store_results(
+		(if export_sketches {store_results} else {store_results_no_sketches})(
 			out_file.as_str(),
 			kind,
 			size,
 			format!("{} + brute-force", index_identifier).as_str(),
 			param_string.as_str(),
-			neighbor_dists,
-			neighbor_ids,
-			data_bins.pop().unwrap(),
-			queries_bins.pop().unwrap(),
+			&neighbor_dists,
+			&neighbor_ids,
+			&data_bins[data_bins.len()-1],
+			&queries_bins[queries_bins.len()-1],
 			build_time,
 			query_time,
 		)?;
@@ -450,6 +476,7 @@ fn run_ram_experiment_no_refine(
 	its_per_sample: usize,
 	noise_std: f32,
 	init_itq: bool,
+	export_sketches: bool,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -558,16 +585,16 @@ fn run_ram_experiment_no_refine(
 	);
 	let out_file = result_path(out_base_path, kind, size, index_identifier.as_str(), param_string.as_str());
 	let storage_timer = Timer::new();
-	store_results_hamming(
+	(if export_sketches {store_results_hamming} else {store_results_hamming_no_sketches})(
 		out_file.as_str(),
 		kind,
 		size,
 		format!("{} + brute-force", index_identifier).as_str(),
 		param_string.as_str(),
-		neighbor_dists,
-		neighbor_ids,
-		data_bins.pop().unwrap(),
-		queries_bins.pop().unwrap(),
+		&neighbor_dists,
+		&neighbor_ids,
+		&data_bins[data_bins.len()-1],
+		&queries_bins[queries_bins.len()-1],
 		build_time,
 		query_time,
 	)?;
@@ -589,6 +616,7 @@ fn run_noram_experiment_no_refine(
 	its_per_sample: usize,
 	noise_std: f32,
 	init_itq: bool,
+	export_sketches: bool,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -687,16 +715,16 @@ fn run_noram_experiment_no_refine(
 	);
 	let out_file = result_path(out_base_path, kind, size, index_identifier.as_str(), param_string.as_str());
 	let storage_timer = Timer::new();
-	store_results_hamming(
+	(if export_sketches {store_results_hamming} else {store_results_hamming_no_sketches})(
 		out_file.as_str(),
 		kind,
 		size,
 		format!("{} + brute-force", index_identifier).as_str(),
 		param_string.as_str(),
-		neighbor_dists,
-		neighbor_ids,
-		data_bins.pop().unwrap(),
-		queries_bins.pop().unwrap(),
+		&neighbor_dists,
+		&neighbor_ids,
+		&data_bins[data_bins.len()-1],
+		&queries_bins[queries_bins.len()-1],
 		build_time,
 		query_time,
 	)?;
@@ -727,6 +755,7 @@ fn main() -> NoRes {
 			args.noise,
 			&probe_vals,
 			args.itq,
+			args.export_sketches,
 		)?;
 	} else {
 		println!("Running \"no refine\" mode with probes {:?}", args.k);
@@ -744,6 +773,7 @@ fn main() -> NoRes {
 			args.batch_its,
 			args.noise,
 			args.itq,
+			args.export_sketches,
 		)?;
 	}
 	Ok(())

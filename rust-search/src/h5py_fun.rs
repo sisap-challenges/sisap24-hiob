@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use pyo3::{Python, types::PyDict, PyErr};
-use numpy::{PyArray2, IntoPyArray};
+use numpy::{PyArray2};
 use ndarray::Array2;
 
 use crate::{Res, NoRes};
@@ -68,8 +68,14 @@ impl<'py> H5PyBuilder<'py> {
 		)?;
 		Ok(self)
 	}
-	pub fn with_dataset<T: numpy::Element>(mut self, dataset_name: &str, dataset: Array2<T>, numpy_type_name: &str) -> Res<Self> {
-		self.locals.set_item("data", dataset.into_pyarray(self.py))?;
+	pub fn with_dataset<T: numpy::Element>(mut self, dataset_name: &str, dataset: &Array2<T>, numpy_type_name: &str) -> Res<Self> {
+		// self.locals.set_item("data", dataset.view().to_pyarray(self.py))?;
+		unsafe {
+			self.locals.set_item(
+				"data",
+				numpy::PyArray2::borrow_from_array(&dataset, self.locals)
+			)?;
+		}
 		self.py.eval(
 			format!("file.create_dataset('{:}', data.shape, dtype=data.dtype, data=data)", dataset_name).as_str(),
 			None,
@@ -89,10 +95,10 @@ pub fn store_results(
 	size: &str,
 	alg_name: &str,
 	parameter_string: &str,
-	neighbor_dists: Array2<f32>,
-	neighbor_ids: Array2<usize>,
-	data_bin: Array2<u64>,
-	query_bin: Array2<u64>,
+	neighbor_dists: &Array2<f32>,
+	neighbor_ids: &Array2<usize>,
+	data_bin: &Array2<u64>,
+	query_bin: &Array2<u64>,
 	build_time: f64,
 	query_time: f64,
 ) -> NoRes {
@@ -115,16 +121,48 @@ pub fn store_results(
 	Ok(())
 }
 
+pub fn store_results_no_sketches(
+	out_file: &str,
+	kind: &str,
+	size: &str,
+	alg_name: &str,
+	parameter_string: &str,
+	neighbor_dists: &Array2<f32>,
+	neighbor_ids: &Array2<usize>,
+	data_bin: &Array2<u64>,
+	query_bin: &Array2<u64>,
+	build_time: f64,
+	query_time: f64,
+) -> NoRes {
+	create_path_to_file(out_file)?;
+	Python::with_gil(|py| {
+		H5PyBuilder::new(py, out_file)?
+		.with_dataset("dists", neighbor_dists, "float32")?
+		.with_dataset("knns", neighbor_ids, "uint64")?
+		// .with_dataset("db", data_bin, "uint64")?
+		// .with_dataset("queries", query_bin, "uint64")?
+		.with_attr_str("algo", alg_name)?
+		.with_attr_str("data", kind)?
+		.with_attr_str("size", size)?
+		.with_attr_str("params", parameter_string)?
+		.with_attr("buildtime", build_time)?
+		.with_attr("querytime", query_time)?
+		.close()?;
+		Ok::<(),Box<dyn std::error::Error>>(())
+	})?;
+	Ok(())
+}
+
 pub fn store_results_hamming(
 	out_file: &str,
 	kind: &str,
 	size: &str,
 	alg_name: &str,
 	parameter_string: &str,
-	neighbor_dists: Array2<usize>,
-	neighbor_ids: Array2<usize>,
-	data_bin: Array2<u64>,
-	query_bin: Array2<u64>,
+	neighbor_dists: &Array2<usize>,
+	neighbor_ids: &Array2<usize>,
+	data_bin: &Array2<u64>,
+	query_bin: &Array2<u64>,
 	build_time: f64,
 	query_time: f64,
 ) -> NoRes {
@@ -135,6 +173,38 @@ pub fn store_results_hamming(
 		.with_dataset("knns", neighbor_ids, "uint64")?
 		.with_dataset("db", data_bin, "uint64")?
 		.with_dataset("queries", query_bin, "uint64")?
+		.with_attr_str("algo", alg_name)?
+		.with_attr_str("data", kind)?
+		.with_attr_str("size", size)?
+		.with_attr_str("params", parameter_string)?
+		.with_attr("buildtime", build_time)?
+		.with_attr("querytime", query_time)?
+		.close()?;
+		Ok::<(),Box<dyn std::error::Error>>(())
+	})?;
+	Ok(())
+}
+
+pub fn store_results_hamming_no_sketches(
+	out_file: &str,
+	kind: &str,
+	size: &str,
+	alg_name: &str,
+	parameter_string: &str,
+	neighbor_dists: &Array2<usize>,
+	neighbor_ids: &Array2<usize>,
+	data_bin: &Array2<u64>,
+	query_bin: &Array2<u64>,
+	build_time: f64,
+	query_time: f64,
+) -> NoRes {
+	create_path_to_file(out_file)?;
+	Python::with_gil(|py| {
+		H5PyBuilder::new(py, out_file)?
+		.with_dataset("dists", neighbor_dists, "uint64")?
+		.with_dataset("knns", neighbor_ids, "uint64")?
+		// .with_dataset("db", data_bin, "uint64")?
+		// .with_dataset("queries", query_bin, "uint64")?
 		.with_attr_str("algo", alg_name)?
 		.with_attr_str("data", kind)?
 		.with_attr_str("size", size)?
