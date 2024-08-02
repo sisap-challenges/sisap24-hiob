@@ -54,5 +54,4 @@ jobs:
             --refine
       - uses: ./.github/actions/evaluation
         with:
-          os: ${{ matrix.os }}
           size: 100M

@@ -19,3 +19,4 @@ rust-search/target
 rust-search/build.sh
 rust-search/Cargo.lock
 
+!eval/eval.py
