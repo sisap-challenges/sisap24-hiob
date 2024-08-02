@@ -1,0 +1,41 @@
+name: System setup
+
+inputs:
+  python-version:
+    description: "What Python version to use"
+    required: true
+    default: 3.11.2
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+    - uses: conda-incubator/setup-miniconda@v2
+      with:
+        auto-update-conda: true
+        python-version: ${{ inputs.python-version }}
+    - name: Create conda environment
+      shell: bash -el {0}
+      run: |
+        conda create -n hiob python=${{ inputs.python-version }}
+    - name: Install dependencies
+      shell: bash -el {0}
+      run: |
+        conda activate hiob
+        pip install numpy
+        pip install h5py
+        pip install maturin
+        pip install matplotlib
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+    - name: Build rust-search crate
+      shell: bash -el {0}
+      run: |
+        conda activate hiob
+        cd rust-search
+        export RUSTFLAGS=" -C target-cpu=native -C opt-level=3"
+        cargo build -r
