@@ -779,7 +779,7 @@ fn run_noram_experiment_no_refine(
 			&neighbor_ids,
 			&data_bins[data_bins.len()-1],
 			&queries_bins[queries_bins.len()-1],
-			build_time,
+			build_time + min_hash_build_times.get(i_searcher).unwrap(),
 			direct_query_time,
 		).unwrap();
 		println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
