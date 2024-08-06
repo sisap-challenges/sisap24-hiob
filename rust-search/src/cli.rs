@@ -53,5 +53,11 @@ pub struct Cli {
 	/// Whether to store the sketches computed by HIOB in the output file
 	#[arg(long, default_value_t=false)]
 	pub export_sketches: bool,
+	/// Whether to use a min hashing based search routine rather than brute force
+	#[arg(long, default_value_t=false)]
+	pub min_hash_search: bool,
+	/// Combinations of num hashes and num bits for min hash search
+	#[arg(long, default_value="(16,5)")]
+	pub min_hash_args: String,
 }
 

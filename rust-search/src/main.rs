@@ -12,6 +12,7 @@ use hiob::{
 	binarizer::HIOBParams,
 	eval::BinarizationEvaluator,
 	progress::par_iter,
+	min_hash_search::MinHashSearcher,
 };
 use ndarray::{Axis, Array2};
 use clap::Parser;
@@ -175,6 +176,7 @@ fn run_experiment(
 	nprobe_vals: &Vec<usize>,
 	init_itq: bool,
 	export_sketches: bool,
+	min_hash_args: Vec<(usize,usize)>,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -185,8 +187,6 @@ fn run_experiment(
 	let queries_path = queries_path(in_base_path, kind);
 	let data_file: H5PyDataset<f32> = H5PyDataset::new(data_path.as_str(), key);
 	let queries_file: H5PyDataset<f32> = H5PyDataset::new(queries_path.as_str(), key);
-	// let data_shape = get_h5py_shape(data_path.as_str(), key)?;
-	// let queries_shape = get_h5py_shape(queries_path.as_str(), key)?;
 	let data_shape = [data_file.n_rows(), data_file.n_cols()];
 	let queries_shape = [queries_file.n_rows(), queries_file.n_cols()];
 
@@ -319,6 +319,7 @@ fn run_noram_experiment(
 	nprobe_vals: &Vec<usize>,
 	init_itq: bool,
 	export_sketches: bool,
+	min_hash_args: Vec<(usize,usize)>,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -477,6 +478,7 @@ fn run_ram_experiment_no_refine(
 	noise_std: f32,
 	init_itq: bool,
 	export_sketches: bool,
+	min_hash_args: Vec<(usize,usize)>,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -617,6 +619,7 @@ fn run_noram_experiment_no_refine(
 	noise_std: f32,
 	init_itq: bool,
 	export_sketches: bool,
+	min_hash_args: Vec<(usize,usize)>,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -672,6 +675,21 @@ fn run_noram_experiment_no_refine(
 	});
 	let build_time = build_timer.elapsed_s();
 	println!("Done training in {:}.", time_format(build_time.clone()));
+	/* Create min search hashers and measure build times separately to aggregate times for different approaches */
+	let mut min_hash_searchers = vec![];
+	let mut min_hash_build_times = vec![];
+	min_hash_args.iter().enumerate().for_each(|(i_hasher, (n_hashes, n_bits))| {
+		let hash_build_timer = Timer::new();
+		let result = MinHashSearcher::new(
+			&data_bins[data_bins.len()-1],
+			*n_hashes,
+			*n_bits,
+		);
+		let hash_build_time = hash_build_timer.elapsed_s();
+		println!("Min Hash Searcher {:} built in {:}.", i_hasher, time_format(hash_build_time));
+		min_hash_searchers.push(result);
+		min_hash_build_times.push(hash_build_time);
+	});
 	
 	let bin_eval = BinarizationEvaluator::new();
 	println!("Starting search on {:?} with nprobes={:?}", queries_shape, k);
@@ -680,7 +698,10 @@ fn run_noram_experiment_no_refine(
 	let queries_bin_timer = Timer::new();
 	let mut queries_bins: Vec<Array2<u64>> = hs.iter().map(|h| h.binarize_h5(queries_path.as_str(), key, 300_000).unwrap()).collect();
 	println!("Queries binarized in {:}", queries_bin_timer.elapsed_str());
-	/* Perform query */
+	let query_setup_time = query_timer.elapsed_s();
+
+
+	/* Perform query immediately without min hash searcher */
 	let query_call_timer = Timer::new();
 	let chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
 	let (mut neighbor_dists, mut neighbor_ids) = bin_eval.cascading_k_smallest_hamming(
@@ -689,20 +710,12 @@ fn run_noram_experiment_no_refine(
 		&vec![k],
 		Some(chunk_size),
 	);
-	// let (mut neighbor_dists, mut neighbor_ids) = bin_eval.query_cascade(
-	// 	&data,
-	// 	&data_bins,
-	// 	&queries,
-	// 	&queries_bins,
-	// 	k,
-	// 	nprobes,
-	// 	Some(chunk_size),
-	// );
-	println!("Queries executed in {:}", query_call_timer.elapsed_str());
+	println!("Queries executed in {:} (direct)", query_call_timer.elapsed_str());
 	/* Change to 1-based index */
 	neighbor_ids.mapv_inplace(|v| v+1);
 	let query_time = query_timer.elapsed_s();
-	println!("Overall query time: {:}", time_format(query_time.clone()));
+	let direct_query_time = query_setup_time + query_call_timer.elapsed_s();
+	println!("Overall query time (direct): {:}", time_format(direct_query_time));
 	/* Create parameter string and store results */
 	let param_string = format!(
 		"index_params=({:}),query_params=(nprobe={:?})",
@@ -729,6 +742,49 @@ fn run_noram_experiment_no_refine(
 		query_time,
 	)?;
 	println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
+
+
+	/* Perform queries with min hash searchers */
+	min_hash_searchers.iter().enumerate().for_each(|(i_searcher, searcher)| {
+		let query_call_timer = Timer::new();
+		let chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
+		let (mut neighbor_dists, mut neighbor_ids) = searcher.query(&queries_bins[0], k, Some(chunk_size));
+		println!("Queries executed in {:} (searcher {:})", query_call_timer.elapsed_str(), i_searcher);
+		/* Change to 1-based index */
+		neighbor_ids.mapv_inplace(|v| v+1);
+		let query_time = query_timer.elapsed_s();
+		let direct_query_time = query_setup_time + query_call_timer.elapsed_s();
+		println!("Overall query time (searcher {:}): {:}", i_searcher, time_format(direct_query_time));
+		/* Create parameter string and store results */
+		let param_string = format!(
+			"index_params=({:}),query_params=(nprobe={:?}),n_hashes={:},n_bits={:}",
+			format!(
+				"scale%=10,its_per_sample={:}",
+				// <usize as NumCast>::from(hs.get(0).unwrap().get_scale()*100f32).unwrap(),
+				its_per_sample,
+			),
+			k,
+			min_hash_args.get(i_searcher).unwrap().0,
+			min_hash_args.get(i_searcher).unwrap().1,
+		);
+		let out_file = result_path(out_base_path, kind, size, index_identifier.as_str(), param_string.as_str());
+		let storage_timer = Timer::new();
+		(if export_sketches {store_results_hamming} else {store_results_hamming_no_sketches})(
+			out_file.as_str(),
+			kind,
+			size,
+			format!("{} + brute-force", index_identifier).as_str(),
+			param_string.as_str(),
+			&neighbor_dists,
+			&neighbor_ids,
+			&data_bins[data_bins.len()-1],
+			&queries_bins[queries_bins.len()-1],
+			build_time,
+			query_time,
+		).unwrap();
+		println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
+	});
+
 	Ok(())
 }
 
@@ -736,6 +792,19 @@ fn run_noram_experiment_no_refine(
 fn main() -> NoRes {
 	let args = Cli::parse();
 	assert!(args.idle_cpus < num_cpus::get());
+	let min_hash_args: Vec<(usize,usize)> = args.min_hash_args
+	.split(",(").enumerate()
+	.map(|(i,v)| {
+		let mut parts = v.split(",");
+		let n_hashes = if i==0 {
+			usize::from_str(parts.next().unwrap().trim().strip_prefix("(").unwrap()).unwrap()
+		} else {
+			usize::from_str(parts.next().unwrap().trim()).unwrap()
+		};
+		let n_bits = usize::from_str(parts.next().unwrap().trim().strip_suffix(")").unwrap()).unwrap();
+		(n_hashes, n_bits)
+	})
+	.collect();
 	let _ = limit_threads(num_cpus::get()-args.idle_cpus);
 	let probe_vals = logspace(args.probe_min, args.probe_max, args.probe_steps);
 	if args.refine {
@@ -756,6 +825,7 @@ fn main() -> NoRes {
 			&probe_vals,
 			args.itq,
 			args.export_sketches,
+			if args.min_hash_search {min_hash_args} else {vec![]},
 		)?;
 	} else {
 		println!("Running \"no refine\" mode with probes {:?}", args.k);
@@ -774,6 +844,7 @@ fn main() -> NoRes {
 			args.noise,
 			args.itq,
 			args.export_sketches,
+			if args.min_hash_search {min_hash_args} else {vec![]},
 		)?;
 	}
 	Ok(())
