@@ -50,7 +50,7 @@ jobs:
             --probe-max 30 \
             --probe-steps 1 \
             --min-hash-search \
-            --min-hash-args "(16,9),(18,9),(20,9),(22,9),(24,9)" \
+            --min-hash-args "(18,9),(20,9),(22,9)" \
             --itq
       - uses: ./.github/actions/evaluation
         with:
