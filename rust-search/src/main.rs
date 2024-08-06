@@ -739,7 +739,7 @@ fn run_noram_experiment_no_refine(
 		&data_bins[data_bins.len()-1],
 		&queries_bins[queries_bins.len()-1],
 		build_time,
-		query_time,
+		direct_query_time,
 	)?;
 	println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
 
@@ -780,7 +780,7 @@ fn run_noram_experiment_no_refine(
 			&data_bins[data_bins.len()-1],
 			&queries_bins[queries_bins.len()-1],
 			build_time,
-			query_time,
+			direct_query_time,
 		).unwrap();
 		println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
 	});
