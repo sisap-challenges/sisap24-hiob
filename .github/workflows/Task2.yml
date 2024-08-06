@@ -44,10 +44,10 @@ jobs:
             --batch-its 1000 \
             --k ${{ inputs.k }} \
             --size 100M \
-            --bits 128 \
+            --bits 256 \
             --noise 0.05 \
-            --probe-min 3300 \
-            --probe-max 5000 \
+            --probe-min 450 \
+            --probe-max 600 \
             --probe-steps 20 \
             --itq \
             --refine
