@@ -50,7 +50,7 @@ fn ensure_files_available(in_base_path: &str, kind: &str, size: &str) -> NoRes {
 	let versions = vec!["query", "dataset"];
 	let urls = vec![
 		// format!("{}/public-queries-10k-{}.h5", base_url, kind),
-		format!("{}/public-queries-2024-laion2B-en-{}-n=10k.h5", base_urls[0], kind),
+		format!("{}/private-queries-2024-laion2B-en-{}-n=10k-epsilon=0.2.h5", base_urls[0], kind),
 		format!("{}/laion2B-en-{}-n={}.h5", base_urls[1], kind, size),
 	];
 	let targets = vec![

@@ -1,0 +1,1 @@
+docker build -t sisap24/hiob . -t "sisap24-hiob"
